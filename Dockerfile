@@ -30,7 +30,7 @@
 # typically not needed.
 
 ARG BASE_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
-ARG BUNDLED_BINARY_SHA256=a646174a7e016ea1f754fe55af3476b6fb7c2be562d25dcf0745e6d5dc26904c
+ARG BUNDLED_BINARY_SHA256=fa582a3866e37e388365d656597dd2e02978cc291aeeaffdae43783f0ab9ca27
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: extract the bundled binary and verify its integrity.
