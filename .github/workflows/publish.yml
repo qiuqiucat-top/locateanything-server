@@ -1,36 +1,12 @@
 name: publish-image
 
-# Builds locateanything-server:cuda from this repo and pushes it to
-# GitHub Container Registry (ghcr.io/qiuqiucat-top/locateanything-server).
-#
-# Triggers:
-#   - tag push:        v1.2.3         → tag :1.2.3, :1.2, :1, :cuda, :latest
-#   - manual dispatch:                → tag :<run_number>-<sha>, :cuda, :latest
-#   - main branch:     (skipped)      → PR builds run but don't push
-#
-# Uses BUILD_MODE=bundle (the 36 MB llama-server.tar.gz committed to the
-# repo) for fast ~30 s builds. Override with BUILD_MODE=source in the
-# workflow_dispatch UI to do a full from-source rebuild.
-
 on:
   push:
-    tags:
-      - 'v*'
-    branches:
-      - main
+    tags: ['v*']
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      build_mode:
-        description: 'BUILD_MODE passed to Dockerfile'
-        required: true
-        default: 'bundle'
-        type: choice
-        options:
-          - bundle
-          - source
 
 permissions:
   contents: read
@@ -44,16 +20,10 @@ jobs:
   build:
     name: build & push (${{ github.event_name }})
     runs-on: ubuntu-22.04
-    # 16 GB is enough for bundle mode; bump to 32 if you flip to source mode
-    # and the build goes OOM (the CUDA layer compile is memory-hungry).
-    # Self-hosted runners recommended for source mode — see README.
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -66,54 +36,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            # SemVer tags for releases
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            # Always-tag aliases
-            type=raw,value=cuda,enable={{is_default_branch}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            # workflow_dispatch tags include the short SHA
-            type=sha,format=short,priority=100
-          labels: |
-            org.opencontainers.image.title=locateanything-server
-            org.opencontainers.image.description=Patched llama-server (mtmd-grounders fork) for LocateAnything-3B GGUFs.
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.vendor=qiuqiucat-top
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
-
-      - name: Determine BUILD_MODE
-        id: buildmode
+      - name: Extract image tags
+        id: tags
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=${{ inputs.build_mode }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tags=locateanything-server:pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "tags=ghcr.io/${{ env.IMAGE_NAME }}:${VERSION},ghcr.io/${{ env.IMAGE_NAME }}:cuda,ghcr.io/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
           else
-            echo "mode=bundle" >> "$GITHUB_OUTPUT"
+            echo "tags=ghcr.io/${{ env.IMAGE_NAME }}:cuda,ghcr.io/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push (push event)
-        id: buildpush
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BUILD_MODE=${{ steps.buildmode.outputs.mode }}
-          cache-from: type=gha,scope=locateanything-buildx
-          cache-to: type=gha,mode=max,scope=locateanything-buildx
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=locateanything-server
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build only (pull_request event)
         if: github.event_name == 'pull_request'
@@ -121,58 +67,36 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
           push: false
           load: true
-          tags: locateanything-server:pr-${{ github.event.pull_request.number }}
-          build-args: |
-            BUILD_MODE=${{ steps.buildmode.outputs.mode }}
+          tags: ${{ steps.tags.outputs.tags }}
 
-      - name: Image digest
-        if: steps.buildpush.outputs.digest != ''
+      - name: Summary
+        if: github.event_name != 'pull_request'
         run: |
           echo "### 🐳 Image published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**\`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`**" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          for tag in $(echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n'); do
-            [ -z "$tag" ] && continue
-            echo "- [\`${tag}\`](https://${tag})" >> "$GITHUB_STEP_SUMMARY"
+          for tag in $(echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n'); do
+            echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
           done
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Pull with:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cuda" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  verify:
+  smoke-test:
     name: smoke-test
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
-    # The runner image has CUDA drivers but no GPU. We can still load the
-    # image and confirm /app/llama-server is the fork binary (by inspecting
-    # strings inside it for the projector type constant).
     steps:
       - name: Pull just-built image
         run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cuda
-      - name: Extract llama-server
+
+      - name: Verify fork binary is shipped
         run: |
           CID=$(docker create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cuda)
           docker cp $CID:/app/llama-server /tmp/llama-server
           docker rm $CID
           chmod +x /tmp/llama-server
-          /tmp/llama-server --version 2>&1 | head -3
-      - name: Confirm fork integration
-        run: |
-          # The fork introduces PROJECTOR_TYPE_LOCATEANYTHING. The binary
-          # links against a constant string "locateanything" (see
-          # ggml/src/ggml-cuda/.../clip.cpp in the fork). Verify it's
-          # actually compiled in — if the binary is just stock llama.cpp
-          # this grep returns nothing and we fail the job.
           if ! strings /tmp/llama-server | grep -q 'locateanything'; then
-            echo "::error::llama-server binary does not contain the 'locateanything' symbol"
-            echo "This means the image is shipping the stock binary, not the fork!"
+            echo "::error::llama-server binary does not contain the 'locateanything' projector symbol"
             exit 1
           fi
-          echo "OK: llama-server binary contains the locateanything projector type"
+          echo "OK: fork binary confirmed"
