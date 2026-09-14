@@ -99,24 +99,37 @@ jobs:
             echo "mode=bundle" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and push
+      - name: Build and push (push event)
+        id: buildpush
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_MODE=${{ steps.buildmode.outputs.mode }}
-          # Cache source-mode layers across runs (saves ~5 min on rebuilds).
           cache-from: type=gha,scope=locateanything-buildx
           cache-to: type=gha,mode=max,scope=locateanything-buildx
 
+      - name: Build only (pull_request event)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: locateanything-server:pr-${{ github.event.pull_request.number }}
+          build-args: |
+            BUILD_MODE=${{ steps.buildmode.outputs.mode }}
+
       - name: Image digest
-        if: github.event_name != 'pull_request'
+        if: steps.buildpush.outputs.digest != ''
         run: |
           echo "### 🐳 Image published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
