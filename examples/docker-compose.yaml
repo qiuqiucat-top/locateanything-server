@@ -1,0 +1,83 @@
+services:
+  locateanything:
+    # Build locally from this repo (preferred):
+    #   docker compose -f examples/docker-compose.yaml build
+    # Or pull from a registry:
+    #   docker compose -f examples/docker-compose.yaml pull
+    image: locateanything-server:cuda
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_MODE: bundle        # or "source" for a clean rebuild
+    container_name: locateanything-3b
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models:ro     # expects:
+                                 #   LocateAnything-3B-Q4_K_M.gguf
+                                 #   mmproj-LocateAnything-3B-BF16.gguf
+      - ./logs/locateanything:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+    command:
+      - -m
+      - /models/LocateAnything-3B-Q4_K_M.gguf
+      - --mmproj
+      - /models/mmproj-LocateAnything-3B-BF16.gguf
+
+      # ── mandatory for grounding output ─────────────────────────────
+      - --special
+
+      # ── GPU placement (single GPU on RTX 3090) ─────────────────────
+      - -ngl
+      - "99"
+      - --split-mode
+      - none
+      - --main-gpu
+      - "0"
+      - --mmproj-device
+      - CUDA0
+
+      # ── context / batching ────────────────────────────────────────
+      - -c
+      - "65536"
+      - -b
+      - "4096"
+      - -ub
+      - "4096"
+      - -np
+      - "16"
+      - --cont-batching
+
+      # ── attention / KV cache ───────────────────────────────────────
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      - -fa
+      - on
+
+      # ── image tokens ──────────────────────────────────────────────
+      - --image-min-tokens
+      - "256"
+      - --image-max-tokens
+      - "768"
+
+      # ── server ────────────────────────────────────────────────────
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --jinja
+      - --metrics
+      - --no-warmup
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: 8gb

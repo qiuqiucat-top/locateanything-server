@@ -1,0 +1,10 @@
+# Build / editor detritus
+*.tar.gz
+!llama-server.tar.gz
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+
+# Logs (mounted into the container)
+logs/

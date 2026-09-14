@@ -1,0 +1,22 @@
+{
+  "model": "/models/LocateAnything-3B-Q4_K_M.gguf",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,<BASE64_OF_YOUR_IMAGE_HERE>"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Locate all the instances that matches the following description: car."
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024,
+  "temperature": 0
+}

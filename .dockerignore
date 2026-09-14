@@ -1,0 +1,13 @@
+.git
+.github
+*.md
+!README.md
+!AGENTS.md
+scripts
+examples
+*.tar.gz
+!llama-server.tar.gz
+.dockerignore
+.idea
+.vscode
+__pycache__
